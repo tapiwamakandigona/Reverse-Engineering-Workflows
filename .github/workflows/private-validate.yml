@@ -1,0 +1,57 @@
+name: private-validate
+# Dedicated manual validation of ONE associated private project
+# (tapiwamakandigona/Reverse-Engineering-Projects). Logs here are PUBLIC: candidate output is
+# captured to a runner-local file and never printed; only a fixed-schema summary is published.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "selftest-pass | selftest-fail | gate"
+        required: true
+        type: choice
+        options: [selftest-pass, selftest-fail, gate]
+      candidate_sha:
+        description: "Full 40-hex commit SHA of the private candidate (gate mode)"
+        required: false
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  group: private-validate
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate inputs
+        env:
+          MODE: ${{ inputs.mode }}
+          CAND: ${{ inputs.candidate_sha }}
+        run: |
+          case "$MODE" in selftest-pass|selftest-fail) exit 0;; gate) ;; *) echo "bad mode"; exit 1;; esac
+          echo "$CAND" | grep -Eq '^[0-9a-f]{40}$' || { echo "candidate_sha must be 40 lowercase hex"; exit 1; }
+      - name: Checkout public validator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          path: validator
+      - name: Checkout private candidate (read-only deploy key, checkout only)
+        if: ${{ inputs.mode == 'gate' }}
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: tapiwamakandigona/Reverse-Engineering-Projects
+          ref: ${{ inputs.candidate_sha }}
+          ssh-key: ${{ secrets.PRIVATE_REPO_READ_KEY }}
+          ssh-strict: true
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          path: candidate
+          show-progress: false
+      - name: Run sanitized validation
+        env:
+          MODE: ${{ inputs.mode }}
+          CAND: ${{ inputs.candidate_sha }}
+        run: python3 validator/ci/run_sanitized.py
