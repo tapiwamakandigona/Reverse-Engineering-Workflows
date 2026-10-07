@@ -29,27 +29,33 @@ jobs:
           MODE: ${{ inputs.mode }}
           CAND: ${{ inputs.candidate_sha }}
         run: |
-          case "$MODE" in selftest-pass|selftest-fail) exit 0;; gate) ;; *) echo "bad mode"; exit 1;; esac
-          echo "$CAND" | grep -Eq '^[0-9a-f]{40}$' || { echo "candidate_sha must be 40 lowercase hex"; exit 1; }
+          python3 - <<'PY'
+          import os, re, sys
+          m, c = os.environ["MODE"], os.environ["CAND"]
+          if m in ("selftest-pass", "selftest-fail"):
+              sys.exit(0 if c == "" else (print("candidate_sha must be empty in selftest modes") or 1))
+          if m != "gate" or re.fullmatch(r"[0-9a-f]{40}", c) is None:
+              print("candidate_sha must be exactly one 40 lowercase hex SHA"); sys.exit(1)
+          PY
       - name: Checkout public validator
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
           path: validator
-      - name: Checkout private candidate (read-only deploy key, checkout only)
+      - name: Fetch private candidate quietly (read-only deploy key, fetch only)
         if: ${{ inputs.mode == 'gate' }}
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          repository: tapiwamakandigona/Reverse-Engineering-Projects
-          ref: ${{ inputs.candidate_sha }}
-          ssh-key: ${{ secrets.PRIVATE_REPO_READ_KEY }}
-          ssh-strict: true
-          persist-credentials: false
-          fetch-depth: 1
-          submodules: false
-          lfs: false
-          path: candidate
-          show-progress: false
+        env:
+          KEY: ${{ secrets.PRIVATE_REPO_READ_KEY }}
+          CAND: ${{ inputs.candidate_sha }}
+        run: |
+          set -e
+          K="$RUNNER_TEMP/k"; umask 077; printf '%s\n' "$KEY" > "$K"
+          KH="$RUNNER_TEMP/kh"; echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$KH"
+          git init -q candidate
+          export GIT_SSH_COMMAND="ssh -i $K -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$KH"
+          git -C candidate fetch -q --depth 1 --no-tags git@github.com:tapiwamakandigona/Reverse-Engineering-Projects.git "$CAND" >/dev/null 2>&1 || { rm -f "$K"; echo "fetch failed"; exit 1; }
+          git -C candidate -c advice.detachedHead=false checkout -q --detach FETCH_HEAD >/dev/null 2>&1 || { rm -f "$K"; echo "checkout failed"; exit 1; }
+          rm -f "$K"
       - name: Run sanitized validation
         env:
           MODE: ${{ inputs.mode }}
