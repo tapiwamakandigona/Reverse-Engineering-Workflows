@@ -1,0 +1,24 @@
+name: public-smoke
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: public-smoke
+  cancel-in-progress: false
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Harmless public fixture (synthetic data, real git CAS)
+        run: python3 fixtures/smoke.py
+      - name: Sanitized summary
+        run: |
+          echo "### public-smoke" >> "$GITHUB_STEP_SUMMARY"
+          echo "commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "fixture sha256: $(sha256sum fixtures/smoke.py | cut -c1-64)" >> "$GITHUB_STEP_SUMMARY"
+          echo "This is a public smoke run, NOT the private project's full gate." >> "$GITHUB_STEP_SUMMARY"
